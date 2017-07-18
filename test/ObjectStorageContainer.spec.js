@@ -10,497 +10,237 @@
  *     See the License for the specific language governing permissions and
  *     limitations under the License.
  */
-var assert = require('chai').assert;
 var Q = require('q');
 var _ = require('lodash');
-var ObjectStorage = require('../lib/ObjectStorage').ObjectStorage;
-var ObjectStorageContainer = require('../lib/ObjectStorageContainer').ObjectStorageContainer;
-var HttpClient = require('../lib/HttpClient').HttpClient;
+var ObjectStorageObject = require('./ObjectStorageObject').ObjectStorageObject;
 
-var credentials = {
-    projectId: 'projectId',
-    userId: 'userId',
-    password: 'password',
-    region: ObjectStorage.Region.DALLAS
+function ObjectStorageContainer(name, objectStorage) {
+    this.name = name;
+    this.baseResourceUrl = objectStorage.baseResourceUrl + '/' + name;
+    this.client = objectStorage.client;
+    this.objectStorage = objectStorage;
+}
+
+/**
+ *  List all objects in this container.
+ *
+ * @return promise
+ */
+ObjectStorageContainer.prototype.listObjects = function() {
+    var deferred = Q.defer();
+    var resourceUrl = this.baseResourceUrl;
+    var self = this;
+
+    this.client.get(resourceUrl)
+        .then(function(response) {
+            var objectList = [];
+            var body = response.body;
+            var list = _.split(body, '\n');
+
+            _.forEach(list, function(name) {
+                if (name && name.length !== 0) {
+                    var object = new ObjectStorageObject(name, self);
+                    objectList.push(object);
+                }
+            });
+            deferred.resolve(objectList);
+        })
+        .catch(function(err) {
+            deferred.reject(err);
+        });
+
+    return deferred.promise;
 };
 
-var response = {};
+/**
+ *  List all objects in this container.
+ *
+ * @return promise
+ */
+ObjectStorageContainer.prototype.search = function(query) {
+    var deferred = Q.defer();
+    var resourceUrl = this.baseResourceUrl + query;
+    var self = this;
 
-describe('ObjectStorageContainer', function() {
-
-    beforeEach(function() {
-        response = {};
-    });
-
-    describe('constructor', function() {
-        it('should correctly set container name, resource url, http client, and ObjectStorage', function() {
-            var objectStorage = new ObjectStorage(credentials);
-            var objectStorageContainer = new ObjectStorageContainer('test', objectStorage);
-
-            assert.strictEqual(objectStorageContainer.objectStorage, objectStorage);
-            assert.equal(objectStorageContainer.containerName(), 'test');
-            assert.equal(objectStorageContainer.baseResourceUrl, objectStorage.baseResourceUrl + '/' + 'test');
-            assert.equal(objectStorageContainer.client, objectStorage.client);
-        });
-    });
-
-    describe('listObjects', function() {
-        it('should correctly parse body and produce an array of objects when response body is nonempty', function(done) {
-            response.body = 'stuff\nmiscellany\nthings\n'
-            var send = HttpClient.prototype.send;
-            HttpClient.prototype.send = function(options) {
-                var deferred = Q.defer();
-                deferred.resolve(response);
-
-                return deferred.promise;
-            };
-            var expectedList = [];
+    this.client.search(resourceUrl)
+        .then(function(response) {
+            var objectList = [];
             var body = response.body;
+            console.log(body)
             var list = _.split(body, '\n');
 
             _.forEach(list, function(name) {
                 if (name && name.length !== 0) {
-                    expectedList.push(name);
+                    var object = new ObjectStorageObject(name, self);
+                    objectList.push(object);
                 }
             });
-            var objectStorage = new ObjectStorage(credentials);
-            var objectStorageContainer = new ObjectStorageContainer('test', objectStorage);
-
-            objectStorageContainer.listObjects()
-                .then(function(actualList){
-                    assert.equal(actualList.length, expectedList.length);
-
-                    actualList.forEach(function(item, index) {
-                        assert.equal(item.objectName(), expectedList[index]);
-                    });
-                    HttpClient.prototype.send = send;
-                    done();
-                })
-                .catch(function(err) {
-                    HttpClient.prototype.send = send;
-                    done(err);
-                });
+            deferred.resolve(objectList);
+        })
+        .catch(function(err) {
+            deferred.reject(err);
         });
-    });
 
-    describe('listObjects', function() {
-        it('should produce an empty array when response body is empty', function(done) {
-            response.body = '';
-            var send = HttpClient.prototype.send;
-            HttpClient.prototype.send = function(options) {
-                var deferred = Q.defer();
-                deferred.resolve(response);
+    return deferred.promise;
+};
 
-                return deferred.promise;
-            };
-            var expectedList = [];
-            var body = response.body;
-            var list = _.split(body, '\n');
+/**
+ *  Retrieve the specified object.
+ *
+ *  @param {string} objectName  The name of the object to retrieve.
+ *  @return promise
+ */
+ObjectStorageContainer.prototype.getObject = function(objectName) {
+    var deferred = Q.defer();
+    var self = this;
+    var resourceUrl = this.baseResourceUrl + '/' + objectName;
 
-            _.forEach(list, function(name) {
-                if (name && name.length !== 0) {
-                    expectedList.push(name);
-                }
+    this.client.get(resourceUrl)
+        .then(function(response) {
+            var object = new ObjectStorageObject(objectName, self);
+            deferred.resolve(object);
+        })
+        .catch(function(err) {
+            deferred.reject(err);
+        });
+
+    return deferred.promise;
+};
+
+/**
+ *  Create a new object with the specified name.
+ *
+ *  @param {string} objectName.  The name of the object to create.
+ *  @param {buffer} data. The content of the object to store
+ *  @param {boolean} binary. True if the content is binary and should not be parsed
+ *  @return promise
+ */
+ObjectStorageContainer.prototype.createObject = function(objectName, data, binary) {
+    var deferred = Q.defer();
+    var self = this;
+    var resourceUrl = this.baseResourceUrl + '/' + objectName;
+
+    this.client.put(resourceUrl, data, binary)
+        .then(function(res) {
+            var object = new ObjectStorageObject(objectName, self);
+            deferred.resolve(object);
+        })
+        .catch(function(err) {
+            deferred.reject(err);
+        });
+
+    return deferred.promise;
+};
+
+/**
+ *  Delete the specified object.
+ *
+ *  @param {string} objectName.  The name of the object to delete.
+ *  @return promise
+ */
+ObjectStorageContainer.prototype.deleteObject = function(objectName) {
+    var deferred = Q.defer();
+    var resourceUrl = this.baseResourceUrl + '/' + objectName;
+
+    this.client.delete(resourceUrl)
+        .then(function(response) {
+            deferred.resolve();
+        })
+        .catch(function(err) {
+            deferred.reject(err);
+        });
+
+    return deferred.promise;
+};
+
+/**
+ *  Retrieve the metadata for this container.
+ *
+ * @return promise
+ */
+ObjectStorageContainer.prototype.metadata = function() {
+    var deferred = Q.defer();
+    var resourceUrl = this.baseResourceUrl;
+
+    this.client.head(resourceUrl)
+        .then(function(response) {
+            var headers = response.headers;
+            var accountMetadata = _.pickBy(headers, function(value, key) {
+                return _.startsWith(key, 'x-container');
             });
-            var objectStorage = new ObjectStorage(credentials);
-            var objectStorageContainer = new ObjectStorageContainer('test', objectStorage);
-
-            objectStorageContainer.listObjects()
-                .then(function(actualList){
-                    assert.equal(actualList.length, expectedList.length);
-                    assert.equal(actualList.length, 0);
-
-                    HttpClient.prototype.send = send;
-                    done();
-                })
-                .catch(function(err) {
-                    HttpClient.prototype.send = send;
-                    done(err);
-                });
+            deferred.resolve(accountMetadata);
+        })
+        .catch(function(err) {
+            deferred.reject(err);
         });
+
+    return deferred.promise;
+};
+
+/**
+ *  Create or Update the specified metadata for this container.
+ *
+ *  @param {object} metadata.  The metadata to update/create for this container.
+ *  @return promise
+ */
+ObjectStorageContainer.prototype.updateMetadata = function(metadata) {
+    var deferred = Q.defer();
+    var prefix = 'X-Container-Meta-';
+    var resourceUrl = this.baseResourceUrl;
+    var headers = {};
+
+    _.forIn(metadata, function(value, key) {
+        var metadataKey = prefix + key;
+        headers[metadataKey] = value;
     });
 
-    describe('listObjects', function() {
-        it('should reject when error caught from client', function(done) {
-            response.body = 'test body';
-            response.statusCode = 404;
-
-            var request = function(option, callback) {
-                callback(null, response, response.body);
-            };
-            var isExp = HttpClient.prototype.isExpired;
-            HttpClient.prototype.isExpired = function(token) {
-                return false;
-            };
-            var client = new HttpClient(credentials, request);
-            var objectStorage = new ObjectStorage(credentials, client);
-            var objectStorageContainer = new ObjectStorageContainer('test', objectStorage);
-
-            objectStorageContainer.listObjects()
-                .then(function(list) {
-                    HttpClient.prototype.isExpired = isExp;
-                    done(new Error());
-                })
-                .catch(function(err) {
-                    HttpClient.prototype.isExpired = isExp;
-                    done();
-                });
+    this.client.post(resourceUrl, headers)
+        .then(function(response) {
+            deferred.resolve();
+        })
+        .catch(function(err) {
+            deferred.reject(err);
         });
+
+    return deferred.promise;
+};
+
+/**
+ *  Delete the specified metadata for this container.
+ *
+ *  @param {object} metadata.  The metadata to delete for this container.
+ *  @return promise
+ */
+ObjectStorageContainer.prototype.deleteMetadata = function(metadata) {
+    var deferred = Q.defer();
+    var prefix = 'X-Remove-Container-Meta-';
+    var resourceUrl = this.baseResourceUrl;
+    var headers = {};
+
+    _.forIn(metadata, function(value, key) {
+        var metadataKey = prefix + key;
+        headers[metadataKey] = value;
     });
 
-    describe('createObject', function() {
-        it('should create a new ObjectStorageObject with the specified name', function(done) {
-            var send = HttpClient.prototype.send;
-            HttpClient.prototype.send = function(options) {
-                var deferred = Q.defer();
-                deferred.resolve(response);
-
-                return deferred.promise;
-            };
-            var objectStorage = new ObjectStorage(credentials);
-            var objectStorageContainer = new ObjectStorageContainer('container', objectStorage);
-
-            objectStorageContainer.createObject('test')
-                .then(function(object) {
-                    assert.equal(object.objectName(), 'test');
-
-                    HttpClient.prototype.send = send;
-                    done();
-                })
-                .catch(function(err) {
-                    HttpClient.prototype.send = send;
-                    done(err);
-                });
+    this.client.post(resourceUrl, headers)
+        .then(function(response) {
+            deferred.resolve();
+        })
+        .catch(function(err) {
+            deferred.reject(err);
         });
-    });
 
-    describe('createObject', function() {
-        it('should reject when error caught from client', function(done) {
-            response.body = 'test body';
-            response.statusCode = 408;
+    return deferred.promise;
+};
 
-            var request = function(option, callback) {
-                callback(null, response, response.body);
-            };
-            var isExp = HttpClient.prototype.isExpired;
-            HttpClient.prototype.isExpired = function(token) {
-                return false;
-            };
-            var client = new HttpClient(credentials, request);
-            var objectStorage = new ObjectStorage(credentials, client);
-            var objectStorageContainer = new ObjectStorageContainer('test', objectStorage);
+/**
+ *  For the testing of things
+ *
+ */
+ObjectStorageContainer.prototype.containerName = function() {
+    return this.name;
+};
 
-            objectStorageContainer.createObject()
-                .then(function(object) {
-                    HttpClient.prototype.isExpired = isExp;
-                    done(new Error());
-                })
-                .catch(function(err) {
-                    HttpClient.prototype.isExpired = isExp;
-                    done();
-                });
-        });
-    });
-
-    describe('getObject', function() {
-        it('should create a ObjectStorageObject object with the specified name', function(done) {
-            var send = HttpClient.prototype.send;
-            HttpClient.prototype.send = function(options) {
-                var deferred = Q.defer();
-                deferred.resolve(response);
-
-                return deferred.promise;
-            };
-            var objectStorage = new ObjectStorage(credentials);
-            var objectStorageContainer = new ObjectStorageContainer('container', objectStorage);
-
-            objectStorageContainer.getObject('test')
-                .then(function(object) {
-                    assert.equal(object.objectName(), 'test');
-
-                    HttpClient.prototype.send = send;
-                    done();
-                })
-                .catch(function(err) {
-                    HttpClient.prototype.send = send;
-                    done(err);
-                });
-        });
-    });
-
-    describe('getObject', function() {
-        it('should reject when error caught from client', function(done) {
-            response.body = 'test body';
-            response.statusCode = 404;
-
-            var request = function(options, callback) {
-                callback(null, response, response.body);
-            };
-            var isExp = HttpClient.prototype.isExpired;
-            HttpClient.prototype.isExpired = function(token) {
-
-                return false;
-            };
-            var client = new HttpClient(credentials, request);
-            var objectStorage = new ObjectStorage(credentials, client);
-            var objectStorageContainer = new ObjectStorageContainer('test', objectStorage);
-
-            objectStorageContainer.getObject()
-                .then(function(object) {
-                    HttpClient.prototype.isExpired = isExp;
-                    done(new Error());
-                })
-                .catch(function(err) {
-
-                    HttpClient.prototype.isExpired = isExp;
-                    done();
-                });
-        });
-    });
-
-    describe('deleteObject', function() {
-        it('should not produce an error', function(done) {
-            var send = HttpClient.prototype.send;
-            HttpClient.prototype.send = function(options) {
-                var deferred = Q.defer();
-                deferred.resolve(response);
-
-                return deferred.promise;
-            };
-            var objectStorage = new ObjectStorage(credentials);
-            var objectStorageContainer = new ObjectStorageContainer('container', objectStorage);
-
-            objectStorageContainer.deleteObject('test')
-                .then(function() {
-                    HttpClient.prototype.send = send;
-                    done();
-                })
-                .catch(function(err) {
-                    HttpClient.prototype.send = send;
-                    done(err);
-                });
-        });
-    });
-
-    describe('deleteObject', function() {
-        it('should reject when error caught from client', function(done) {
-            response.body = 'test body';
-            response.statusCode = 404;
-
-            var request = function(option, callback) {
-                callback(null, response, response.body);
-            };
-            var isExp = HttpClient.prototype.isExpired;
-            HttpClient.prototype.isExpired = function(token) {
-                return false;
-            };
-            var client = new HttpClient(credentials, request);
-            var objectStorage = new ObjectStorage(credentials, client);
-            var objectStorageContainer = new ObjectStorageContainer('test', objectStorage);
-
-            objectStorageContainer.deleteObject('object')
-                .then(function() {
-                    HttpClient.prototype.isExpired = isExp;
-                    done(new Error());
-                })
-                .catch(function(err) {
-                    HttpClient.prototype.isExpired = isExp;
-                    done();
-                });
-        });
-    });
-
-    describe('metadata', function() {
-        it('should parse headers and only return x-container-meta headers corresponding to account metadata', function(done) {
-            response.headers = {
-                'x-container-meta-this': 'this',
-                'x-container-meta-that': 'that',
-                'Content-Type': 'type'
-            };
-            var send = HttpClient.prototype.send;
-            HttpClient.prototype.send = function(options) {
-                var deferred = Q.defer();
-                deferred.resolve(response);
-
-                return deferred.promise;
-            };
-            var expectedMetadata = {
-                'x-container-meta-this': 'this',
-                'x-container-meta-that': 'that'
-            };
-            var objectStorage = new ObjectStorage(credentials);
-            var objectStorageContainer = new ObjectStorageContainer('container', objectStorage);
-
-            objectStorageContainer.metadata()
-                .then(function(actualMetadata) {
-                    assert.deepEqual(actualMetadata, expectedMetadata);
-
-                    HttpClient.prototype.send = send;
-                    done();
-                })
-                .catch(function(err) {
-                    HttpClient.prototype.send = send;
-                    done(err);
-                });
-        });
-    });
-
-    describe('metadata', function() {
-        it('should reject when error caught from client', function(done) {
-            response.body = 'test body';
-            response.statusCode = 500;
-
-            var request = function(option, callback) {
-                callback(null, response, response.body);
-            };
-            var isExp = HttpClient.prototype.isExpired;
-            HttpClient.prototype.isExpired = function(token) {
-                return false;
-            };
-            var client = new HttpClient(credentials, request);
-            var objectStorage = new ObjectStorage(credentials, client);
-            var objectStorageContainer = new ObjectStorageContainer('test', objectStorage);
-
-            objectStorageContainer.metadata()
-                .then(function(metadata) {
-                    HttpClient.prototype.isExpired = isExp;
-                    done(new Error());
-                })
-                .catch(function(err) {
-                    HttpClient.prototype.isExpired = isExp;
-                    done();
-                });
-        });
-    });
-
-    describe('updateMetadata', function() {
-        it('should append appropriate header key to each metadata key passed in', function(done) {
-            var metadata = {
-                'this': 'this',
-                'that': 'that'
-            };
-            var send = HttpClient.prototype.send;
-            HttpClient.prototype.send = function(options) {
-                var deferred = Q.defer();
-                var headers = options.headers;
-
-                assert.isOk(headers['X-Container-Meta-this']);
-                assert.isOk(headers['X-Container-Meta-that']);
-                assert.equal(headers['X-Container-Meta-this'], metadata['this']);
-                assert.equal(headers['X-Container-Meta-that'], metadata['that']);
-                deferred.resolve(response);
-
-                return deferred.promise;
-            };
-            var objectStorage = new ObjectStorage(credentials);
-            var objectStorageContainer = new ObjectStorageContainer('container', objectStorage);
-
-            objectStorageContainer.updateMetadata(metadata)
-                .then(function() {
-                    HttpClient.prototype.send = send;
-                    done();
-                })
-                .catch(function(err) {
-                    HttpClient.prototype.send = send;
-                    done(err);
-                });
-        });
-    });
-
-    describe('updateMetadata', function() {
-        it('should reject when error caught from client', function(done) {
-            response.body = 'test body';
-            response.statusCode = 500;
-            var metadata = {
-                'this': 'this',
-                'that': 'that'
-            };
-            var request = function(option, callback) {
-                callback(null, response, response.body);
-            };
-            var isExp = HttpClient.prototype.isExpired;
-            HttpClient.prototype.isExpired = function(token) {
-                return false;
-            };
-            var client = new HttpClient(credentials, request);
-            var objectStorage = new ObjectStorage(credentials, client);
-            var objectStorageContainer = new ObjectStorageContainer('test', objectStorage);
-
-            objectStorageContainer.updateMetadata(metadata)
-                .then(function() {
-                    HttpClient.prototype.isExpired = isExp;
-                    done(new Error());
-                })
-                .catch(function(err) {
-                    HttpClient.prototype.isExpired = isExp;
-                    done();
-                });
-        });
-    });
-
-    describe('deleteMetadata', function() {
-        it('should append appropriate header key to each metadata key passed in', function(done) {
-            var metadata = {
-                'this': 'this',
-                'that': 'that'
-            };
-            var send = HttpClient.prototype.send;
-            HttpClient.prototype.send = function(options) {
-                var deferred = Q.defer();
-                var headers = options.headers;
-
-                assert.isOk(headers['X-Remove-Container-Meta-this']);
-                assert.isOk(headers['X-Remove-Container-Meta-that']);
-                assert.equal(headers['X-Remove-Container-Meta-this'], metadata['this']);
-                assert.equal(headers['X-Remove-Container-Meta-that'], metadata['that']);
-                deferred.resolve(response);
-
-                return deferred.promise;
-            };
-            var objectStorage = new ObjectStorage(credentials);
-            var objectStorageContainer = new ObjectStorageContainer('container', objectStorage);
-
-            objectStorageContainer.deleteMetadata(metadata)
-                .then(function() {
-                    HttpClient.prototype.send = send;
-                    done();
-                })
-                .catch(function(err) {
-                    HttpClient.prototype.send = send;
-                    done(err);
-                });
-        });
-    });
-
-    describe('deleteMetadata', function() {
-        it('should reject when error caught from client', function(done) {
-            response.body = 'test body';
-            response.statusCode = 500;
-            var metadata = {
-                'this': 'this',
-                'that': 'that'
-            };
-
-            var request = function(option, callback) {
-                callback(null, response, response.body);
-            };
-            var isExp = HttpClient.prototype.isExpired;
-            HttpClient.prototype.isExpired = function(token) {
-                return false;
-            };
-            var client = new HttpClient(credentials, request);
-            var objectStorage = new ObjectStorage(credentials, client);
-            var objectStorageContainer = new ObjectStorageContainer('test', objectStorage);
-
-            objectStorageContainer.deleteMetadata(metadata)
-                .then(function() {
-                    HttpClient.prototype.isExpired = isExp;
-                    done(new Error());
-                })
-                .catch(function(err) {
-                    HttpClient.prototype.isExpired = isExp;
-                    done();
-                });
-        });
-    });
-});
+module.exports = {
+    ObjectStorageContainer: ObjectStorageContainer
+};
